@@ -1,0 +1,59 @@
+{
+  "id": "pkg-16",
+  "calibration": false,
+  "source": "pandas-dev/pandas#57666",
+  "captured": "2026-08-18",
+  "repo_facts": {
+    "raw_markdown": "- repo: pandas-dev/pandas (49511 stars, archived: no)\n- description: Flexible and powerful data analysis / manipulation library for Python, providing labeled data structures similar to R data.frame objects, statistical functions, and much more.\n- latest release: v3.0.5 (2026-07-22)\n- bug reports: template asks reporters to confirm the bug exists on the latest version and on the main branch, and to provide a reproducible example, an issue description, the expected behavior, and the output of `pd.show_versions()`\n- contribution policy (CONTRIBUTING.md): standard contribution guide; no stated AI policy"
+  },
+  "issue": {
+    "title": "BUG: pyarrow read_csv engine stripping leading zeros with dtype=str",
+    "number": 57666,
+    "author": "dadrake3",
+    "author_association": "NONE",
+    "opened": "2024-02-28",
+    "state": "open",
+    "labels": [
+      "Bug",
+      "IO CSV",
+      "Arrow"
+    ],
+    "body_markdown": "With `engine=\"pyarrow\"` and `dtype=str`, leading zeros in numeric-\nlooking columns are removed even though the resulting column type is\nobject. The python engine keeps them.\n\n```python\ndf_arrow = pd.read_csv(StringIO(x), delimiter=\"|\", header=None,\n                       dtype=str, engine=\"pyarrow\",\n                       keep_default_na=False)\n```\n\nFor input rows like `AB|000388907|abc|0150`, the pyarrow engine\nyields `388907` and `150`; the python engine yields `000388907` and\n`0150` as expected.\n\nExpected: when treating all columns as strings, leading zeros are\nretained and the data is unmodified."
+  },
+  "comments_total": 14,
+  "thread_highlights": [
+    {
+      "date": "2024-03-15",
+      "author": "mroeschke",
+      "author_association": "MEMBER",
+      "summary_markdown": "asks whether pyarrow's own `pyarrow.csv.read_csv` shows the same result"
+    },
+    {
+      "date": "2024-03-15",
+      "author": "benjaminbauer",
+      "author_association": "NONE",
+      "summary_markdown": "matrix test: pandas python engine keeps `01`, pandas pyarrow engine strips to `1`, pyarrow native `csv.read_csv` keeps `01`"
+    },
+    {
+      "date": "2024-03-23",
+      "author": "jorisvandenbossche",
+      "author_association": "MEMBER",
+      "summary_markdown": "explains the cause: the `dtype` argument is handled only as post-processing; pandas lets pyarrow read the CSV with type inference (numeric here) and afterwards casts the result to the requested dtype, which is why the zeros are lost"
+    },
+    {
+      "date": "2025-07-03",
+      "author": "dxdc",
+      "author_association": "NONE",
+      "summary_markdown": "still present with pyarrow 20 / pandas 2.3"
+    },
+    {
+      "date": "2025-07-04",
+      "author": "dxdc",
+      "author_association": "NONE",
+      "summary_markdown": "sketches the fix direction: map `dtype` into pyarrow's `column_types` in `_get_pyarrow_options` so pyarrow parses the columns as strings in the first place"
+    }
+  ],
+  "repro_evidence_markdown": "The reproduction this plan builds on, excerpted from the accepted\nrepro report:\n\nEnvironment: pandas 3.0.5, pyarrow 21.0, Python 3.12, Ubuntu 24.04.\n\nSteps (single-column matrix, value `01`):\n\n1. pandas, `engine=\"python\"`, `dtype=str`: value reads as `\"01\"`.\n2. pandas, `engine=\"pyarrow\"`, `dtype=str`: value reads as `\"1\"`.\n3. pyarrow native, `pa.csv.read_csv` with\n   `convert_options=ConvertOptions(column_types={\"a\": pa.string()})`:\n   value reads as `\"01\"`.\n4. pyarrow native with no `column_types` (inference on): the table's\n   column arrives as `int64` with value `1`; the zeros are already\n   gone in the parsed table, before any cast to string could run.\n\nExpected: step 2 matches steps 1 and 3.\n\nActual: only the pandas pyarrow engine strips the zeros. Step 4\npins where they disappear: during pyarrow's typed parse under\ninference, not afterward; pyarrow itself preserves them whenever it\nis told to parse the column as string (step 3), matching the member's\nexplanation in the thread.",
+  "plan_markdown": "### Diagnosis\n\nThe defect is in the pandas-side cast that runs after pyarrow returns\nits table. `ArrowParserWrapper._finalize_pandas_output` casts the\ninferred numeric columns to the requested `dtype=str` using a plain\n`astype`, and Python's integer-to-string formatting emits `388907`\nwithout its original zeros. The cast is where the data is damaged, so\nthe cast is what must change.\n\n### Scope\n\nIn scope: the post-read cast in\n`pandas/io/parsers/arrow_parser_wrapper.py`. Not in scope: pyarrow's\nreader options or the python engine.\n\n### Files\n\n- `pandas/io/parsers/arrow_parser_wrapper.py`\n  (`_finalize_pandas_output`)\n- `pandas/tests/io/parser/test_read_fwf.py` area tests for dtype=str\n\n### Approach\n\nReplace the plain `astype(str)` with a zero-preserving string\nformatter: when the requested dtype is string and the inferred column\nis integer, re-pad the rendered strings to the column's original\nwidth so `388907` renders as `000388907` again. Width can be\nrecovered from the maximum digit count of the column plus the pad the\nCSV used.\n\n### Test plan\n\nThe issue's four-row example matches the python engine's output; the\nparser test suite passes for the pyarrow engine.",
+  "plan_comment_markdown": "I worked through this one end to end (matrix in my report). The\ndamage happens in the pandas post-read cast, so my plan is to make\n`_finalize_pandas_output` cast integer columns to strings with a\nzero-preserving formatter that restores the original column width,\nmatching the python engine's output on the issue's example. It is\ncontained to the arrow parser wrapper and comes with parser tests.\nI'll open the PR once the suite is green."
+}

@@ -1,0 +1,26 @@
+{
+  "id": "calib-01",
+  "calibration": true,
+  "source": "jesseduffield/lazygit#5900",
+  "captured": "2026-08-18",
+  "repo_facts": {
+    "raw_markdown": "- repo: jesseduffield/lazygit (81423 stars, archived: no)\n- description: Simple terminal UI for git commands.\n- latest release: v0.64.1 (2026-08-12)\n- bug reports: template asks for the lazygit version, git version, operating system, and a description with steps\n- contribution policy (CONTRIBUTING.md): the maintainer reviews outside pull requests only selectively (maintaining is a hobby and review time is scarce, especially with AI-generated PRs hard to assess); issue reports remain welcome; no stated AI disclosure requirement"
+  },
+  "issue": {
+    "title": "In commits of local branch a push does not refresh the color of the commit",
+    "number": 5900,
+    "author": "chhil",
+    "author_association": "NONE",
+    "opened": "2026-08-06",
+    "state": "open",
+    "labels": [
+      "bug"
+    ],
+    "body_markdown": "In the Local Branches window, double click into a branch's commits.\nAn unpushed commit shows in the unpushed color. Push it: the color\ndoes not change, though the commit was pushed. Escaping out to\nbranches and coming back into commits refreshes the color to indicate\nit is no longer local.\n\nExpected: a color change to reflect a successful push.\n\nVersion: 0.64.0 (Homebrew), macOS, git 2.55.0."
+  },
+  "comments_total": 0,
+  "thread_highlights": [],
+  "repro_evidence_markdown": "The reproduction this plan builds on, excerpted from the accepted\nrepro report:\n\nEnvironment: lazygit 0.64.1 (Homebrew), git 2.55.0, macOS 14.5,\niTerm2; test repo with an origin remote.\n\nSteps:\n\n1. Made a local commit, opened Local Branches, entered the branch's\n   commits view: the new commit renders in the unpushed color\n   (yellow) and the older pushed ones in the default color.\n2. Pressed `P` to push from that view. Push succeeded (remote ref\n   updated; confirmed with `git log origin/main -1` in another\n   shell).\n3. The commit still renders in the unpushed color in the open\n   commits view.\n4. Pressed Esc to branches, re-entered commits: the commit now\n   renders in the pushed color.\n\nExpected: step 3 shows the pushed color without leaving the view.\n\nActual: the color updates only after exiting and re-entering,\nmatching the issue.",
+  "plan_markdown": "Cause: after a push started from the branch-commits view, that view's\nmodel is not refreshed, so the commits keep their pre-push\npush-status flags until the view is rebuilt on re-entry.\n\nChange: trigger a refresh of the commits context after a successful\npush. In: the push completion callback in\n`pkg/gui/controllers/sync_controller.go` adds the commits context to\nits post-push refresh scope. Out: any change to how push status is\ncomputed, or to other views' refresh behavior.\n\nTest: repro steps above; at step 3 the color must flip without\nleaving the view. Also check the same from the main commits panel and\nafter a force push, since both share the callback.",
+  "plan_comment_markdown": "Reproduced on 0.64.1 (report above). The post-push refresh scope\njust misses the branch-commits context; plan is a one-change fix in\nthe sync controller's push callback plus a manual check across the\ntwo commit views and force push. Will send the PR shortly; keeping\nit minimal given the review-bandwidth note in CONTRIBUTING."
+}

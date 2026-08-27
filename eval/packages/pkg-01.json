@@ -1,0 +1,40 @@
+{
+  "id": "pkg-01",
+  "calibration": false,
+  "source": "httpie/cli#1838",
+  "captured": "2026-08-18",
+  "repo_facts": {
+    "raw_markdown": "- repo: httpie/cli (38430 stars, archived: no)\n- description: Modern, user-friendly command-line HTTP client for the API era. JSON support, colors, sessions, downloads.\n- latest release: 3.2.4 (2024-11-01)\n- bug reports: template asks reporters to confirm they searched for similar issues and are on the latest version, and to provide minimal reproduction steps\n- contribution policy (CONTRIBUTING.md): standard contribution guide; no stated AI policy"
+  },
+  "issue": {
+    "title": "Inconsistent argument parsing behavior across Python versions (< 3.13 vs 3.13+)",
+    "number": 1838,
+    "author": "Im-Siyoun",
+    "author_association": "NONE",
+    "opened": "2026-04-30",
+    "state": "open",
+    "labels": [
+      "bug",
+      "new"
+    ],
+    "body_markdown": "The position of optional flags (like `-v`) affects argument parsing\ndifferently depending on the Python version. This is due to\nimprovements in Python 3.13's argparse module, but it creates an\ninconsistent user experience for users on Python 3.11/3.12 (still\nofficially supported until 2027-2028).\n\nTest case 1: `-v` flag after URL (fails on Python 3.11-3.12, works on\n3.13+):\n\n```\n$ http --offline --ignore-stdin post pie.dev/post -v 'header1:xyz' x=1\n```\n\nOn Python 3.11 and 3.12 this prints:\n\n```\nusage:\n    http [METHOD] URL [REQUEST_ITEM ...]\n\nerror:\n    unrecognized arguments: header1:xyz x=1\n```\n\nOn Python 3.13.5 and higher the same command prints the full request\nwith `header1: xyz` and `{\"x\": \"1\"}` as expected.\n\nTest case 2: `-v` before the URL fails on all versions tested.\n\nExpected: the command should work consistently across all supported\nPython versions, regardless of where optional flags are placed."
+  },
+  "comments_total": 4,
+  "thread_highlights": [
+    {
+      "date": "2026-05-01",
+      "author": "Im-Siyoun",
+      "author_association": "NONE",
+      "summary_markdown": "if this is an argparse limitation or intended behavior, clearer documentation or better error messaging may still help users on Python below 3.13"
+    },
+    {
+      "date": "2026-06-12",
+      "author": "rupayon123",
+      "author_association": "NONE",
+      "summary_markdown": "tried clean virtualenvs with PyPI httpie 3.2.4; on their machine the post-URL variant succeeded on Python 3.12.13 and 3.14.5, while the pre-URL variant failed on both; results may vary by argparse point release"
+    }
+  ],
+  "repro_evidence_markdown": "The reproduction this plan builds on, excerpted from the accepted\nrepro report:\n\nEnvironment: HTTPie 3.2.4 (pip), macOS 14.5 (arm64); Python 3.11.15\nand 3.13.5 side by side via pyenv virtualenvs.\n\nSteps:\n\n1. In the 3.11.15 venv:\n\n```\n$ http --offline --ignore-stdin post pie.dev/post -v 'header1:xyz' x=1\nusage:\n    http [METHOD] URL [REQUEST_ITEM ...]\n\nerror:\n    unrecognized arguments: header1:xyz x=1\n$ echo $?\n2\n```\n\n2. Control run, same venv, same items, no `-v` flag:\n\n```\n$ http --offline --ignore-stdin post pie.dev/post 'header1:xyz' x=1\nPOST /post HTTP/1.1\n...\nheader1: xyz\n\n{\"x\": \"1\"}\n```\n\n3. Same command as step 1 in the 3.13.5 venv: prints the full request,\n   exit 0.\n\n4. `--debug` on the failing run shows the error is raised by\n   argparse's `parse_args` while consuming positionals; the request\n   items are never handed to HTTPie's item parser.\n\nExpected: step 1 behaves like step 3 on every supported Python.\n\nActual: with exactly one trailing flag between the URL and the request\nitems, Python 3.11/3.12 argparse stops consuming positionals and\nreports them unrecognized; the same items parse fine without the flag\n(step 2) and on 3.13 (step 3).",
+  "plan_markdown": "### Diagnosis\n\nThe `REQUEST_ITEM` tokenizer in `httpie/cli/requestitems.py` is the\nproblem. Its separator regex fails to recognize `header1:xyz` and\n`x=1` as valid items when an optional flag appears earlier in the\nargument list, so the items fall through as unrecognized arguments.\nThe Python-version difference is a red herring; the tokenizer has\nalways been too strict about colon items.\n\n### Scope\n\nIn scope: rewrite the request-item tokenizer's separator matching so\ncolon and equals items are recognized regardless of surrounding flags.\nNot in scope: argparse itself, flag handling, docs.\n\n### Files\n\n- `httpie/cli/requestitems.py` (the item tokenizer and its regex)\n- `tests/test_cli.py` (new tokenizer cases)\n\n### Approach\n\n1. Extend the item-separator regex to accept item tokens that follow\n   an optional flag.\n2. Add tokenizer unit tests for `header1:xyz` and `x=1` in\n   flag-adjacent positions.\n\n### Test plan\n\nRe-run the issue's test case 1 on Python 3.11: after the tokenizer\nfix, the request prints with `header1: xyz` present, exit 0. Run the\ntokenizer unit tests on 3.11, 3.12, and 3.13.",
+  "plan_comment_markdown": "I dug into this and the root cause is httpie's own request-item\ntokenizer being too strict, not argparse: I plan to rewrite the\nseparator matching in `requestitems.py` so colon and equals items\nparse regardless of flag position, with tests across 3.11-3.13. The\nversion difference in the report is a side effect. I'll have a PR up\nonce the tokenizer tests pass."
+}

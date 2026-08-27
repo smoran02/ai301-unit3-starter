@@ -1,0 +1,40 @@
+{
+  "id": "pkg-05",
+  "calibration": false,
+  "source": "conda/conda#16502",
+  "captured": "2026-08-18",
+  "repo_facts": {
+    "raw_markdown": "- repo: conda/conda (7485 stars, archived: no)\n- description: A system-level, binary package and environment manager running on all major operating systems and platforms.\n- latest release: 26.7.0 (2026-07-31)\n- bug reports: template asks for a descriptive title, a duplicate search, what happened, and the output of `conda info` and `conda list`\n- contribution policy (CONTRIBUTING.md, section \"Generative AI\"): generative AI tools welcome; you are responsible for all contributions and must review and understand AI-generated content before including it in a pull request"
+  },
+  "issue": {
+    "title": "Cached notices block newer notices",
+    "number": 16502,
+    "author": "danyeaw",
+    "author_association": "MEMBER",
+    "opened": "2026-08-06",
+    "state": "open",
+    "labels": [
+      "type::bug",
+      "source::anaconda"
+    ],
+    "body_markdown": "Per-channel notice responses are cached (`cached_response` in\n`conda/notices/cache.py`) and considered fresh until any cached\nnotice's expiry passes (or is missing). While fresh, no network\nrequest is made, so a notice published later for that channel is\ninvisible until the earliest cached expiry elapses.\n\nConcrete scenario:\n\n1. Channel publishes notice A with `expires_at` 90 days out; a user's\n   client fetches and caches it.\n2. One week later the channel publishes notice B (in addition to A).\n3. The user's client serves the cached payload for about 83 more\n   days; notice B is never shown during that window.\n\nExpected: staleness is bounded so newly published notices reach users\nwithin a reasonable interval.\n\nActual: staleness is unbounded and controlled entirely by the\npreviously published notices' expiry dates, which the channel owner\nmay legitimately set far in the future.\n\nSuggested fix in the issue: add a maximum age to the per-channel\nresponse cache, recommend using the `NOTICES_DECORATOR_DISPLAY_INTERVAL`\nconstant (24h)."
+  },
+  "comments_total": 2,
+  "thread_highlights": [
+    {
+      "date": "2026-08-12",
+      "author": "travishathaway",
+      "author_association": "CONTRIBUTOR",
+      "summary_markdown": "the right variable to use is the `NOTICES_DECORATOR_DISPLAY_INTERVAL` constant, currently 24 hours, which would prevent the described behavior"
+    },
+    {
+      "date": "2026-08-17",
+      "author": "danyeaw",
+      "author_association": "MEMBER",
+      "summary_markdown": "agrees, and clarifies that the TTL still needs to be wired into `get_notice_response_from_cache()` to fix the issue"
+    }
+  ],
+  "repro_evidence_markdown": "The reproduction this plan builds on, excerpted from the accepted\nrepro report:\n\nEnvironment: conda 26.7.0 (Miniconda), Python 3.13, Ubuntu 24.04; a\nlocal file-based test channel.\n\nSteps:\n\n1. Served a `notices.json` on the test channel containing notice A\n   with `expires_at` 90 days out.\n2. `conda notices -c <test-channel>`: notice A prints; the response\n   lands in the notices cache directory.\n3. Added notice B to the channel's `notices.json` (A unchanged).\n4. `conda notices -c <test-channel>` again (minutes later): only\n   notice A prints. No request hits the channel server (verified in\n   the file server's access log: one request total).\n5. Control: deleted the cache file and re-ran: A and B both print,\n   and the access log shows a second request.\n\nExpected: notice B reaches the client within a bounded interval.\n\nActual: the cached response for the channel is treated as fresh until\nnotice A's expiry, so B is invisible; only clearing the cache (or\nwaiting out the 90 days) surfaces it, matching the issue.",
+  "plan_markdown": "Diagnosis: as the issue states and the repro confirms, cache freshness\nin `conda/notices/cache.py` is derived only from the cached notices'\nown `expires_at` values, so one long-lived notice pins the whole\nchannel response.\n\nScope, one bounded change: add a maximum cache age to the freshness\ncheck in `get_notice_response_from_cache()`, using the existing\n`NOTICES_DECORATOR_DISPLAY_INTERVAL` constant (24h) as the cap, per\nthe direction already settled in the thread. Not in scope: the notice\ndisplay cadence itself, channel protocol changes, or cache storage\nformat.\n\nFiles: `conda/notices/cache.py` (the freshness check),\n`tests/notices/test_cache.py` (new cases).\n\nApproach: compute the cached response's age from the cache file's\nstored timestamp; treat the response as stale when age exceeds the\nconstant, even if every cached notice is unexpired. Add unit tests\nfor: unexpired notices but stale-by-age (refetch), fresh-by-age (no\nrefetch), and the existing expiry-based path unchanged.\n\nTest plan: re-run the repro scenario with the cache file's timestamp\nbackdated by 25 hours: step 4 must fetch and print A and B (access\nlog shows the second request). Un-backdated, step 4 must stay served\nfrom cache. Unit tests as above.\n\nRisk: none identified beyond one extra network request per channel\nper 24h, which is the constant's existing meaning.",
+  "plan_comment_markdown": "I reproduced the pinning behavior with a local test channel (report\nabove) and would like to implement the fix along the lines already\nagreed here: wiring `NOTICES_DECORATOR_DISPLAY_INTERVAL` into\n`get_notice_response_from_cache()` as a maximum response age, with\nunit tests for the stale-by-age and fresh-by-age paths. Nothing\noutside the cache freshness check. I'll report back with the PR once\nthe tests pass locally."
+}

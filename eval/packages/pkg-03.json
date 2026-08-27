@@ -1,0 +1,51 @@
+{
+  "id": "pkg-03",
+  "calibration": false,
+  "source": "BurntSushi/ripgrep#3222",
+  "captured": "2026-08-18",
+  "repo_facts": {
+    "raw_markdown": "- repo: BurntSushi/ripgrep (67368 stars, archived: no)\n- description: ripgrep recursively searches directories for a regex pattern while respecting your gitignore.\n- latest release: 15.2.0 (2026-07-15)\n- bug reports: template asks for the ripgrep version, how it was installed, the operating system, a description of the bug, steps to reproduce, actual behavior, and expected behavior\n- contribution policy (CONTRIBUTING.md section \"Use of AI\", AI_POLICY.md): AI-assisted coding is welcome with a human in the loop who understands the work; comments to maintainers must be written by humans in their own words, and AI-generated comments may be hidden"
+  },
+  "issue": {
+    "title": "Calls to compression tools need to separate file names from options",
+    "number": 3222,
+    "author": "jafd",
+    "author_association": "NONE",
+    "opened": "2025-11-18",
+    "state": "open",
+    "labels": [
+      "bug"
+    ],
+    "body_markdown": "A directory holds gzipped files whose names start with a dash, like\n`-10:29.log.gz`. Searching them with `rg -z ...` fails:\n\n```\ngzip: invalid option -- '0'\nTry `gzip --help' for more information.\n```\n\nThe reason: ripgrep calls the compression tools without separating\noptions from file names with the customary `--` separator, so gzip\ntreats the filename as a string of options and bails. Likely the case\nwith other compression tools too.\n\nSteps: create a file named `-10.txt` with some text, gzip it (for\nexample `gzip ./-10.txt`), and try `rg -z sometext`.\n\nExpected: ripgrep searches within such a file."
+  },
+  "comments_total": 4,
+  "thread_highlights": [
+    {
+      "date": "2025-11-18",
+      "author": "jafd",
+      "author_association": "NONE",
+      "summary_markdown": "also present on ripgrep 14 as shipped by Fedora"
+    },
+    {
+      "date": "2025-11-20",
+      "author": "jafd",
+      "author_association": "NONE",
+      "summary_markdown": "#3224 should be able to fix this"
+    },
+    {
+      "date": "2026-03-23",
+      "author": "mango766",
+      "author_association": "NONE",
+      "summary_markdown": "opened PR #3314, which adds `--` before the filename when calling compression tools"
+    },
+    {
+      "date": "2026-03-23",
+      "author": "jafd",
+      "author_association": "NONE",
+      "summary_markdown": "asks the PR author whether they saw the prior art mentioned one comment above"
+    }
+  ],
+  "repro_evidence_markdown": "The reproduction this plan builds on, excerpted from the accepted\nrepro report:\n\nEnvironment: ripgrep 15.2.0 (cargo install), gzip 1.13, Fedora 42.\n\nSteps:\n\n```\n$ mkdir /tmp/rgz && cd /tmp/rgz\n$ printf 'sometext\\n' > ./-10.txt\n$ gzip ./-10.txt\n$ rg -z sometext\ngzip: invalid option -- '1'\nTry `gzip --help' for more information.\n$ echo $?\n1\n```\n\nControl run, a dash-free name in the same directory:\n\n```\n$ printf 'sometext\\n' > normal.txt && gzip normal.txt\n$ rg -z sometext\nnormal.txt.gz\n1:sometext\n```\n\nExpected: both files match.\n\nActual: the dash-named file makes gzip parse the filename as options,\nmatching the issue; the normally named file searches fine.",
+  "plan_markdown": "Diagnosis: matches the issue and the repro: the decompression command\nis spawned with the filename in option position, and any leading-dash\nname is read as options by the tool.\n\nChange: in the command construction in\n`crates/cli/src/decompress.rs`, append `--` before the file path for\nevery spawned decompression tool. In scope: the argument separator\nonly. Not in scope: shell quoting, the choice of tools, or the\nmatching logic.\n\nApproach: one-line change in the command builder plus a table check:\ngzip, bzip2, xz, zstd, lz4, and brotli all accept `--` as\nend-of-options (GNU-style parsing); I have verified gzip, xz, and\nzstd locally and will verify the remaining three against their\nmanpages before the PR, noting any tool that does not support `--` as\nan open question in the PR description.\n\nTest plan: re-run the repro: `rg -z sometext` in the fixture\ndirectory prints a match from `-10.txt.gz`, exit 0; the control file\nstill matches. Add the dash-named fixture to the compression\nintegration tests.",
+  "plan_comment_markdown": "I reproduced this on 15.2.0 (report above) and want to carry it to a\nfix. Plan: add the `--` separator in the decompress command builder,\nverify each spawned tool accepts it, and land a dash-named-file\nregression test. I saw the prior art note (#3224) and the open PR\n#3314 that adds the separator; my intent is not to race it. If #3314\nis picked up I will add the regression tests against it instead. Per\nthe repo's AI policy: the fix will be AI-assisted with me reviewing\nand understanding every change, and this comment is in my own words."
+}

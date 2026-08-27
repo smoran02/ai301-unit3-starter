@@ -1,0 +1,40 @@
+{
+  "id": "calib-02",
+  "calibration": true,
+  "source": "laurent22/joplin#15309",
+  "captured": "2026-08-18",
+  "repo_facts": {
+    "raw_markdown": "- repo: laurent22/joplin (55986 stars, archived: no)\n- description: Joplin, the privacy-focused note taking app with sync capabilities for Windows, macOS, Linux, Android and iOS.\n- latest release: v3.6.15 (2026-06-20)\n- bug reports: template asks for the operating system, the Joplin version, desktop version info, current behavior, expected behavior, and logs\n- contribution policy (CONTRIBUTING.md): standard contribution guide; no stated AI policy"
+  },
+  "issue": {
+    "title": "Can't undo after toggle editor change (markdown vs wytiwys)",
+    "number": 15309,
+    "author": "zhizhongpu",
+    "author_association": "NONE",
+    "opened": "2026-05-09",
+    "state": "open",
+    "labels": [
+      "bug",
+      "stale"
+    ],
+    "body_markdown": "Joplin 3.6.11 (prod, darwin), macOS, Rich Text editor.\n\nCurrent behavior:\n\n1. Write something in the markdown editor.\n2. Toggle editor to wysiwyg (via the Toggle editors shortcut).\n3. Toggle back to markdown.\n4. Undo.\n5. Step 1's text is not reverted.\n\nExpected: after the round-trip toggle, undo reverts the step-1 edit."
+  },
+  "comments_total": 7,
+  "thread_highlights": [
+    {
+      "date": "2026-06-15",
+      "author": "zhizhongpu",
+      "author_association": "NONE",
+      "summary_markdown": "still present in 3.6.13 and 3.6.14; asks for the stale label to be removed"
+    },
+    {
+      "date": "2026-07-17",
+      "author": "zhizhongpu",
+      "author_association": "NONE",
+      "summary_markdown": "not fixed (replying to the stale bot again)"
+    }
+  ],
+  "repro_evidence_markdown": "The reproduction this plan builds on, excerpted from the accepted\nrepro report:\n\nEnvironment: Joplin 3.6.15 (prod, darwin), macOS 14.5, Apple M2;\nfresh profile, Markdown editor default.\n\nSteps:\n\n1. New note, typed `undo target line` in the markdown editor.\n2. Toggled to the rich text editor and back (Toggle editors\n   shortcut, twice).\n3. Pressed Cmd+Z in the markdown editor.\n\nArtifact: screen recording described in the report; the note still\ncontains `undo target line` after step 3, and further Cmd+Z presses\ndo nothing. Control: without the toggle round-trip, Cmd+Z after step\n1 removes the typed line as expected.\n\nExpected: undo reverts the step-1 edit after the toggle round-trip.\n\nActual: the editor's undo stack no longer contains the edit after\ntoggling, matching the issue on current 3.6.15.",
+  "plan_markdown": "Honestly this one seems really annoying and I'd love to fix it! Undo\nis probably handled somewhere in the editor code, maybe per-editor,\nso the undo stack must be getting lost when the editors switch. My\nplan is to poke around the editor components this weekend, figure out\nwhere the undo history lives, and send a PR that makes undo work\nacross toggles. Should be doable in a few evenings.\n\nTest plan: undo works after toggling.",
+  "plan_comment_markdown": "This bug has been bugging me too, so I'm going to fix it! I'll dig\ninto the editor code this weekend and should have a PR up soon that\nmakes undo survive the editor toggle. Wish me luck!"
+}

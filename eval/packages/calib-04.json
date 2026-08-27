@@ -1,0 +1,39 @@
+{
+  "id": "calib-04",
+  "calibration": true,
+  "source": "BurntSushi/ripgrep#3070",
+  "captured": "2026-08-18",
+  "repo_facts": {
+    "raw_markdown": "- repo: BurntSushi/ripgrep (67368 stars, archived: no)\n- description: ripgrep recursively searches directories for a regex pattern while respecting your gitignore.\n- latest release: 15.2.0 (2026-07-15)\n- bug reports: template asks for the ripgrep version, how it was installed, the operating system, a description of the bug, steps to reproduce, actual behavior, and expected behavior\n- contribution policy (CONTRIBUTING.md section \"Use of AI\", AI_POLICY.md): AI-assisted coding is welcome with a human in the loop who understands the work; comments to maintainers must be written by humans in their own words, and AI-generated comments may be hidden"
+  },
+  "issue": {
+    "title": "Commands that use glob filters with absolute paths behave differently depending on cwd",
+    "number": 3070,
+    "author": "mattalxndr",
+    "author_association": "NONE",
+    "opened": "2025-06-20",
+    "state": "open",
+    "labels": [
+      "bug"
+    ],
+    "body_markdown": "ripgrep 14.1.1, Arch Linux. Steps:\n\n```\n ~ % mkdir /tmp/rg\n ~ % echo 1 > /tmp/rg/one.txt\n ~ % echo 2 > /tmp/rg/two.txt\n / % rg --glob='!/tmp/rg/two.txt' . /tmp/rg/\n/tmp/rg/one.txt\n1:1\n /tmp/rg % rg --glob='!/tmp/rg/two.txt' . /tmp/rg/\n/tmp/rg/one.txt\n1:1\n\n/tmp/rg/two.txt\n1:2\n```\n\nThe same command excludes `two.txt` when run from `/` but not when\nrun from `/tmp/rg`."
+  },
+  "comments_total": 3,
+  "thread_highlights": [
+    {
+      "date": "2025-06-20",
+      "author": "BurntSushi",
+      "author_association": "OWNER",
+      "summary_markdown": "ripgrep does not really have a way to filter on absolute paths; it is a limitation of the gitignore paradigm, and `-g/--glob` is documented to behave like gitignore; working as intended, though counter-intuitive, and ripgrep probably should have a better way to approach the problem"
+    },
+    {
+      "date": "2025-10-16",
+      "author": "BurntSushi",
+      "author_association": "OWNER",
+      "summary_markdown": "looked into whether there is an easy fix, figured out the problem, but \"the fix is hard\": the `ignore` crate did not carefully consider how filtering interacts with the current working directory when patterns are matched relative to different roots"
+    }
+  ],
+  "repro_evidence_markdown": "The reproduction this plan builds on, excerpted from the accepted\nrepro report:\n\nEnvironment: ripgrep 15.2.0 (pacman), Arch Linux.\n\nSteps:\n\n```\n$ mkdir /tmp/rgt && echo 1 > /tmp/rgt/one.txt && echo 2 > /tmp/rgt/two.txt\n$ cd / && rg --glob='!/tmp/rgt/two.txt' . /tmp/rgt/\n/tmp/rgt/one.txt\n1:1\n$ cd /tmp/rgt && rg --glob='!/tmp/rgt/two.txt' . /tmp/rgt/\n/tmp/rgt/one.txt\n1:1\n\n/tmp/rgt/two.txt\n1:2\n```\n\nControl: a relative glob (`--glob='!two.txt'`) excludes the file from\nboth working directories.\n\nExpected: the absolute-path glob behaves the same regardless of cwd.\n\nActual: the exclusion holds from `/` and silently stops holding from\ninside the directory, matching the issue on current 15.2.0.",
+  "plan_markdown": "### Diagnosis\n\nGrounded in the owner's analysis in the thread: `-g` patterns are\nmatched gitignore-style relative to a root that shifts with the\nworking directory, so a pattern written as an absolute path only\nlines up with candidate paths from some cwds.\n\n### Scope\n\nOne bounded change: patterns that begin with `/` and name an existing\nabsolute path are normalized at flag-processing time to be relative\nto the search root they fall under, so they match identically from\nany cwd. In scope: the glob preprocessing in\n`crates/core/flags/hiargs.rs` where override globs are built, and the\noverride builder setup in the `ignore` crate consumer. Not in scope:\ngeneral gitignore semantics, config-file globs, or the `ignore`\ncrate's internal matching, per the owner's note that the deep fix is\nhard; this is the narrow absolute-prefix case only, and I would\npresent it as opt-in behavior for review given the documented\ngitignore semantics.\n\n### Approach\n\n1. At override-build time, detect `-g` patterns starting with `/`\n   that resolve under a provided search path; rewrite them relative\n   to that search path.\n2. Leave every other pattern untouched.\n3. Document the normalization in the `-g` flag docs.\n\n### Test plan\n\nRun the full test suite (`cargo test --workspace`) and make sure\nnothing regresses.",
+  "plan_comment_markdown": "I read the discussion here, including the note that the deep fix in\nthe ignore crate is hard: this proposal deliberately stays out of the\ncrate and only normalizes the narrow absolute-path-prefix case at\nflag time, presented as a behavior change for the maintainers to\naccept or reject given the documented gitignore semantics. The plan\nnames the exact preprocessing site and stays one bounded change. Per\nthe repo's AI policy: the implementation will be AI-assisted with me\nreviewing every change, and this comment is in my own words."
+}

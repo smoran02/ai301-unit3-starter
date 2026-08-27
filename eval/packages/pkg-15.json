@@ -1,0 +1,57 @@
+{
+  "id": "pkg-15",
+  "calibration": false,
+  "source": "laurent22/joplin#16215",
+  "captured": "2026-08-18",
+  "repo_facts": {
+    "raw_markdown": "- repo: laurent22/joplin (55986 stars, archived: no)\n- description: Joplin, the privacy-focused note taking app with sync capabilities for Windows, macOS, Linux, Android and iOS.\n- latest release: v3.6.15 (2026-06-20); the issue targets the 3.7.10 prerelease\n- bug reports: template asks for the operating system, the Joplin version, desktop version info, current behavior, expected behavior, and logs\n- contribution policy (CONTRIBUTING.md): standard contribution guide; no stated AI policy"
+  },
+  "issue": {
+    "title": "WebDAV sync ETIMEDOUT returns in 3.7.10: 250 ms autoSelectFamily timeout aborts slow connections",
+    "number": 16215,
+    "author": "PandaWood",
+    "author_association": "NONE",
+    "opened": "2026-08-16",
+    "state": "open",
+    "labels": [
+      "bug"
+    ],
+    "body_markdown": "Follow-up to #16201: the previously linked fix addressed a WebDAV\nheader rejection, which cannot produce an ETIMEDOUT; that symptom has\na separate root cause, now isolated.\n\nEnvironment: Joplin 3.7.10 (AppImage), Electron 42.3.0, bundled Node\n24.15.0, Arch-based Linux; sync target WebDAV (Koofr).\n\nCurrent behavior: sync fails intermittently with\n`FetchError: ... reason: Code: ETIMEDOUT` from node-fetch, while\n`curl` and a current system Node succeed instantly against the same\nURL. The UI reports \"Synchronisation finished\" with no visible error\n(related: #12810).\n\nRoot cause per the report: Node's Happy Eyeballs implementation\n(`autoSelectFamily`) races connection attempts and aborts each after\n`autoSelectFamilyAttemptTimeout`, which defaults to 250 ms in the\nbundled runtime (verified via `ELECTRON_RUN_AS_NODE`). The sync\nhost resolves to two A records and TCP connect takes 320-360 ms from\nthe reporter's location, so every attempt is aborted. Current Node\nships a 500 ms default."
+  },
+  "comments_total": 7,
+  "thread_highlights": [
+    {
+      "date": "2026-08-17",
+      "author": "mrjo118",
+      "author_association": "COLLABORATOR",
+      "summary_markdown": "asks whether other clients get decent speed from the same server, and whether the issue also occurs on mobile"
+    },
+    {
+      "date": "2026-08-17",
+      "author": "PandaWood",
+      "author_association": "NONE",
+      "summary_markdown": "argues 250 ms connect latency rules out most intercontinental server choices, and that the repro isolates the variable (same binary, same URL, only the timeout differs); mobile sync worked fine"
+    },
+    {
+      "date": "2026-08-17",
+      "author": "PandaWood",
+      "author_association": "NONE",
+      "summary_markdown": "background: Node took 250 ms from RFC 8305 but uses it as an abort deadline, where the RFC uses it as the moment to start a parallel attempt"
+    },
+    {
+      "date": "2026-08-17",
+      "author": "mrjo118",
+      "author_association": "COLLABORATOR",
+      "summary_markdown": "made a code change updating the default to 500 ms to match Node 26, built a development Windows binary for testing (no way to test a slow TCP connection locally)"
+    },
+    {
+      "date": "2026-08-18",
+      "author": "PandaWood",
+      "author_association": "NONE",
+      "summary_markdown": "offers to build the fix from the branch to test it"
+    }
+  ],
+  "repro_evidence_markdown": "The reproduction this plan builds on, excerpted from the accepted\nrepro report:\n\nEnvironment: Joplin 3.7.10 (AppImage), CachyOS (Arch), KDE Plasma 6;\nsync target WebDAV at app.koofr.net (resolves to 2 A records from\nhere); measured TCP connect time to the host: 320-360 ms across 20\nattempts (`nping` samples in the report).\n\nSteps:\n\n1. `ELECTRON_RUN_AS_NODE=1 ./joplin -e 'console.log(require(\"net\").getDefaultAutoSelectFamilyAttemptTimeout())'`\n   prints `250`.\n2. Triggered sync: fails with the issue's exact\n   `FetchError ... Code: ETIMEDOUT` against `info.json`; the UI\n   still reports \"Synchronisation finished\".\n3. Control: same URL via `curl` from the same shell: 200 OK in under\n   a second, every attempt.\n4. Control: a 5-line fetch script on system Node 26.7.0 (default\n   timeout 500 ms) against the same URL: succeeds on all 10 runs.\n5. Control: the same script with\n   `net.setDefaultAutoSelectFamilyAttemptTimeout(250)`: fails with\n   ETIMEDOUT on 8 of 10 runs.\n\nExpected: Joplin's bundled runtime tolerates connect latency above\n250 ms, as current Node defaults do.\n\nActual: the 250 ms abort deadline reproduces the sync failure\ndeterministically, and raising it (control 4 vs 5) flips the outcome,\nisolating the timeout as the variable.",
+  "plan_markdown": "### Diagnosis\n\nConfirmed as reported: the bundled runtime's 250 ms\n`autoSelectFamilyAttemptTimeout` aborts legitimate slow connects; the\ncontrol matrix isolates the timeout as the deciding variable.\n\n### Proposed changes\n\n1. Set the default `autoSelectFamilyAttemptTimeout` to 500 ms at app\n   startup to match current Node (the direct fix).\n2. While touching the network stack: replace `node-fetch` with\n   `undici` across the desktop sync code, since node-fetch is in\n   maintenance mode and undici handles Happy Eyeballs natively.\n3. Add a Settings > Synchronisation panel field exposing the timeout\n   for users on very slow links.\n4. Fix the silent-success UI while in the area: sync failures should\n   surface in the sync status instead of \"Synchronisation finished\"\n   (the #12810 behavior the report mentions).\n5. Add a retry-with-backoff wrapper around the sync target's fetch\n   calls so transient connect aborts do not fail a whole sync pass.\n\n### Files and areas\n\nApp startup (timeout default), `packages/lib` sync and WebDAV driver\n(fetch replacement, retry wrapper), desktop Settings UI (new field),\nsync status UI (error surfacing).\n\n### Test plan\n\nOn the slow-connect setup, sync succeeds 10 of 10 runs after the\nchange; the new settings field round-trips; sync failures injected\nvia an unreachable host surface visibly in the UI.",
+  "plan_comment_markdown": "I filed the isolation above (timeout matrix in the report) and want\nto fix this properly. Beyond bumping the default to 500 ms, which\nmrjo118's test build already tries, I plan to move the desktop sync\nstack from node-fetch to undici, expose the timeout in Settings, make\nsync failures visible in the UI, and wrap the sync fetches in\nretry-with-backoff. That covers the whole failure surface this\nuncovered rather than just the constant. Happy to split into a PR\nseries, starting with the undici migration."
+}

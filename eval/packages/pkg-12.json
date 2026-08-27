@@ -1,0 +1,34 @@
+{
+  "id": "pkg-12",
+  "calibration": false,
+  "source": "prettier/prettier#19116",
+  "captured": "2026-08-18",
+  "repo_facts": {
+    "raw_markdown": "- repo: prettier/prettier (52202 stars, archived: no)\n- description: Prettier is an opinionated code formatter.\n- latest release: 3.9.6 (2026-07-21)\n- bug reports: template asks for the prettier version, a playground or runnable reproduction, the input, the actual output, and the expected output\n- contribution policy (CONTRIBUTING.md, section \"AI usage policy\"): only submit code you fully understand and have tested; be prepared to explain your changes; do not ignore the issue and PR templates; low-quality AI content is closed immediately"
+  },
+  "issue": {
+    "title": "Markdown: inline code spans wrapping across lines inside list-item continuations lose indent on the closing line",
+    "number": 19116,
+    "author": "timhaines",
+    "author_association": "NONE",
+    "opened": "2026-05-07",
+    "state": "open",
+    "labels": [
+      "status:needs discussion",
+      "lang:markdown"
+    ],
+    "body_markdown": "Prettier 3.8.3, `--parser markdown`. Input:\n\n````markdown\n- Top-level:\n  - Sub-bullet wraps and contains\n    `someInlineCode(arg1, arg2,\n    arg3, arg4)` and continues with more text after the\n    code span closes.\n````\n\nOutput: the line after the wrapped inline code span loses its 4-space\ncontinuation indent and lands at column 0:\n\n```diff\n - Top-level:\n   - Sub-bullet wraps and contains\n     `someInlineCode(arg1, arg2,\n-    arg3, arg4)` and continues with more text after the\n+arg3, arg4)` and continues with more text after the\n     code span closes.\n```\n\nExpected: the closing line preserves the indent required for the\nsub-bullet's continuation under CommonMark.\n\nImpact from the report: CommonMark parsers terminate the sub-bullet\nat the column-0 line, and in the original document a following\nsublist was silently re-parsed into a different structure. The output\nis idempotent, so `--check` reports clean afterward and CI does not\ncatch the corruption."
+  },
+  "comments_total": 1,
+  "thread_highlights": [
+    {
+      "date": "2026-06-08",
+      "author": "tats-u",
+      "author_association": "CONTRIBUTOR",
+      "summary_markdown": "notes both input and output produce the same HTML in commonmark.js, micromark, markdown-it, and marked"
+    }
+  ],
+  "repro_evidence_markdown": "The reproduction this plan builds on, excerpted from the accepted\nrepro report:\n\nEnvironment: prettier 3.9.6 via `pnpm dlx`, Node 22.11, macOS 14.5;\n`repro.md` containing exactly the issue's input; no `.prettierrc`.\n\nSteps:\n\n```\n$ pnpm dlx prettier@3.9.6 --check repro.md\nChecking formatting...\n[warn] repro.md\n$ pnpm dlx prettier@3.9.6 repro.md\n- Top-level:\n  - Sub-bullet wraps and contains\n    `someInlineCode(arg1, arg2,\narg3, arg4)` and continues with more text after the\n    code span closes.\n```\n\nControl (idempotence): writing the output back and running prettier\nagain produces byte-identical output, and `--check` then reports\nclean, matching the issue's CI-blindness note.\n\nExpected: the `arg3, arg4)` line keeps its 4-space indent.\n\nActual: the closing line of the wrapped code span is emitted at\ncolumn 0 on current 3.9.6, matching the issue.",
+  "plan_markdown": "### Background\n\nMarkdown wrapping in the printer has accumulated special cases, and\nthis bug is a symptom of that accumulation. Handling it well is an\nopportunity to put list-item continuation handling on a solid\nfooting.\n\n### Proposed changes\n\n1. Replace the markdown printer's inline-code wrapping logic with a\n   new width-aware wrapping algorithm that tracks the enclosing\n   block's continuation indent as a first-class concept, instead of\n   patching indent after the fact.\n2. Normalize all continuation-indent handling (lists, blockquotes,\n   footnotes) through the new mechanism so every construct shares one\n   code path.\n3. While in there, adjust `proseWrap` behavior inside list items so\n   wrapped prose and wrapped code spans share the new indent\n   tracking, and introduce a `markdownIndentAdjust` option for users\n   who prefer the old emission.\n4. Restructure `src/language-markdown/printer-markdown.js` into\n   focused modules (block context, inline wrapping, emission) to keep\n   the new algorithm reviewable.\n\n### Test plan\n\nThe issue's repro formats with the indent preserved; the markdown\nformat test suite passes after snapshot updates for the constructs\nthe new algorithm touches.",
+  "plan_comment_markdown": "I reproduced this on 3.9.6 and read through the markdown printer.\nRather than spot-fix the one emission site, my plan is to rebuild the\ninline wrapping on a proper continuation-indent model, unify list,\nblockquote, and footnote indent handling on it, tune proseWrap inside\nlist items to match, add a `markdownIndentAdjust` option for\ncompatibility, and split the printer into modules along the way. It\nis a larger change than the diff in the issue suggests, but it fixes\nthe class rather than the instance. Happy to start with a draft PR so\nthe structure can be reviewed early."
+}

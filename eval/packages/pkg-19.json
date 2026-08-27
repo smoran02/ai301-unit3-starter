@@ -1,0 +1,41 @@
+{
+  "id": "pkg-19",
+  "calibration": false,
+  "source": "vuejs/core#9396",
+  "captured": "2026-08-18",
+  "repo_facts": {
+    "raw_markdown": "- repo: vuejs/core (54212 stars, archived: no)\n- description: Vue.js is a progressive, incrementally-adoptable JavaScript framework for building UI on the web.\n- latest release: v3.5.41 (2026-08-05)\n- bug reports: template requires the version, a minimal reproduction link (SFC playground or repo), steps to reproduce, what is expected, and what is actually happening\n- contribution policy (.github/contributing.md): standard contribution guide; no stated AI policy"
+  },
+  "issue": {
+    "title": "Transition: custom appear(-active/to) classes stay on the element after transition ends.",
+    "number": 9396,
+    "author": "cess123456",
+    "author_association": "NONE",
+    "opened": "2023-10-13",
+    "state": "open",
+    "labels": [
+      "bug",
+      "scope: transition",
+      "p3-minor-bug"
+    ],
+    "body_markdown": "Vue 3.2.20, with an SFC playground reproduction linked. When using\nthe Transition component with `appear` and a custom `appearToClass`,\nwrapping a component that uses `v-show` (initially false), the class\nadded via `appearToClass` never disappears from the node after the\ntransition ends.\n\nExpected: the custom appear-to class is removed when the transition\nfinishes, like the built-in classes.\n\nActual: the `appearToClass` value remains on the element\nindefinitely (screenshot in thread shows the class still present)."
+  },
+  "comments_total": 3,
+  "thread_highlights": [
+    {
+      "date": "2023-10-13",
+      "author": "LinusBorg",
+      "author_association": "MEMBER",
+      "summary_markdown": "these classes are not meant to stay on the element; they are added for one frame at the end and removed right after the transition finishes, so this works as intended"
+    },
+    {
+      "date": "2023-10-16",
+      "author": "cess123456",
+      "author_association": "NONE",
+      "summary_markdown": "agrees they should not stay, but they do, with a screenshot showing the class still on the node; that is the bug"
+    }
+  ],
+  "repro_evidence_markdown": "The reproduction this plan builds on, excerpted from the accepted\nrepro report:\n\nEnvironment: Vue 3.5.41, Vite playground, Chromium 138, macOS 14.5.\n\nSteps:\n\n1. Minimal SFC: `<Transition appear appear-to-class=\"fade-appear-to\">`\n   wrapping a `<p v-show=\"shown\">` that starts false and is set true\n   in `onMounted`.\n2. After the appear transition completes (transition duration 300ms,\n   checked at t+2s), inspected the element in devtools.\n\nArtifact: the element's classList at t+2s reads\n`[\"fade-appear-to\"]`; an `animationend`/`transitionend` listener\nconfirms the transition fired and ended.\n\nControl: the same component with the default classes (no\n`appear-to-class` prop): at t+2s the classList is empty; the\nbuilt-in `v-enter-to` class was removed at transition end as\ndocumented.\n\nExpected: the custom appear-to class is removed at transition end\nexactly like the default class in the control.\n\nActual: only the custom-named class leaks and stays on the element,\nmatching the issue's screenshot on current 3.5.41.",
+  "plan_markdown": "### Background\n\nTransition's class bookkeeping has grown organically across enter,\nleave, and appear variants, with custom-class props layered on. This\nleak shows the bookkeeping needs a real owner, so this plan\nmodernizes the whole lifecycle rather than patching one removal.\n\n### Proposed changes\n\n1. Rebuild the Transition class lifecycle as an explicit state\n   machine module (`runtime-dom/src/components/TransitionState.ts`)\n   that owns every add/remove for enter, leave, and appear phases,\n   replacing the scattered `addTransitionClass` /\n   `removeTransitionClass` calls.\n2. Unify appear handling with enter handling so custom appear-*\n   classes flow through the same removal path as the defaults (the\n   leak's class of bug becomes unrepresentable).\n3. Add a `persistClass` prop for users who deliberately want a class\n   retained after the transition, since the state machine makes that\n   cheap to offer.\n4. Migrate the runtime-dom Transition tests to a new table-driven\n   harness that asserts the full class timeline per phase, replacing\n   the current ad hoc assertions.\n5. Deprecate the internal hooks the old code exposed to\n   TransitionGroup and port TransitionGroup onto the state machine.\n\n### Test plan\n\nThe repro's custom appear-to class is removed at transition end, and\nthe migrated Transition and TransitionGroup suites pass on the new\nharness.",
+  "plan_comment_markdown": "Reproduced on 3.5.41 (report above; the control shows only\ncustom-named classes leak). Rather than chase the one missing\nremoval, I plan to rebuild Transition's class lifecycle as a state\nmachine, unify appear with enter, port TransitionGroup onto it, add a\n`persistClass` opt-in, and migrate the tests to a timeline harness.\nThat makes this whole class of leak unrepresentable. It touches most\nof the transition code, so I'd open it as an RFC-style draft PR\nfirst."
+}

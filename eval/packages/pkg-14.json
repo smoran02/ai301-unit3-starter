@@ -1,0 +1,51 @@
+{
+  "id": "pkg-14",
+  "calibration": false,
+  "source": "zellij-org/zellij#5174",
+  "captured": "2026-08-18",
+  "repo_facts": {
+    "raw_markdown": "- repo: zellij-org/zellij (34973 stars, archived: no)\n- description: A terminal workspace with batteries included.\n- latest release: v0.44.3 (2026-05-13)\n- bug reports: template asks for an issue description, a minimal reproduction, and other relevant information (zellij version, terminal, OS)\n- contribution policy (CONTRIBUTING.md): standard contribution guide; no stated AI policy"
+  },
+  "issue": {
+    "title": "Zellij 0.44.2: OSC color sequences leak into terminal on session reattach via SSH",
+    "number": 5174,
+    "author": "carlosemart",
+    "author_association": "NONE",
+    "opened": "2026-05-14",
+    "state": "open",
+    "labels": [
+      "suspected bug"
+    ],
+    "body_markdown": "When attaching to an existing session over SSH, Zellij 0.44.2 prints\nraw OSC terminal color response sequences directly into the terminal\noutput instead of consuming them internally, producing visible\ngarbage such as `rgb:8787/d7d7/5f5f` strings (apparently OSC 4 / OSC\n10 / OSC 11 color query responses).\n\nImportant behavior difference from the report: the issue does NOT\noccur when the session is first created; it appears after detaching\nand re-attaching, which suggests the problem is specific to reattach\nstate restoration. It occurs in 0.44.2 but not 0.44.1 with the same\nsetup.\n\nMinimal reproduction:\n\n1. `ssh testhost -t zellij attach -c implacable-tambourine`\n2. The session behaves correctly.\n3. Detach, then re-run the same command to re-attach.\n4. Raw OSC color responses are printed into the terminal.\n\nEnvironment: zellij 0.44.2, WezTerm, connection over SSH."
+  },
+  "comments_total": 6,
+  "thread_highlights": [
+    {
+      "date": "2026-05-19",
+      "author": "vtomCD",
+      "author_association": "NONE",
+      "summary_markdown": "similar behavior when switching between sessions on Windows in WezTerm (0.44.3)"
+    },
+    {
+      "date": "2026-05-27",
+      "author": "epoweripione",
+      "author_association": "NONE",
+      "summary_markdown": "same on Debian 13 with zsh, 0.44.3"
+    },
+    {
+      "date": "2026-06-23",
+      "author": "aidnem",
+      "author_association": "NONE",
+      "summary_markdown": "same on Windows PowerShell when attaching, no SSH involved"
+    },
+    {
+      "date": "2026-07-30",
+      "author": "jeromejanicot",
+      "author_association": "NONE",
+      "summary_markdown": "clearing `~/.cache/zellij` gives one clean launch; the leak returns once the cache folder is recreated; no issues on macOS with WezTerm or Ghostty"
+    }
+  ],
+  "repro_evidence_markdown": "The reproduction this plan builds on, excerpted from the accepted\nrepro report:\n\nEnvironment: zellij 0.44.3 (cargo install) on Ubuntu 24.04 (server),\nattached from WezTerm 20240203 on macOS 14.5 over SSH; zsh 5.9.\n\nSteps:\n\n1. `ssh testhost -t zellij attach -c repro-session`: clean first\n   attach, normal session.\n2. Detached with `Ctrl-o d`.\n3. Re-ran the same ssh command to re-attach.\n4. On re-attach, several lines of raw color strings printed into the\n   pane, of the form `rgb:1c1c/1c1c/1c1c` and fragments interleaved\n   with prompt output (copied verbatim into the report).\n5. Repeated detach/attach 5 times: the leak appeared on every\n   re-attach, never on a fresh session create.\n\nControl runs:\n\n- Same host and terminal on zellij 0.44.1: 5 reattach cycles, no\n  leak.\n- After `rm -rf ~/.cache/zellij` (thread observation): the next\n  attach is clean, the one after leaks again.\n\nExpected: reattach consumes color query responses internally, as\nfirst attach does.\n\nActual: every reattach on 0.44.x from 0.44.2 on prints the raw OSC\nresponses, matching the issue; the regression window and cache\nobservation both reproduce.",
+  "plan_markdown": "Diagnosis: on reattach, zellij issues OSC 4/10/11 color queries to\nthe client terminal (used for theme detection) but the reattach path\nwires the client's stdin to the session before the query responses\nhave been consumed, so the responses arrive as ordinary input and are\nechoed into the active pane. Grounded in the repro: fresh attach\n(which performs the same queries behind the loading screen) is clean,\nthe leak starts exactly at reattach, and 0.44.1, which predates the\nreattach-path change in 0.44.2, is clean on the same setup. The cache\ncontrol fits: with an empty cache the color data is refetched along\nthe fresh-attach path once.\n\nScope, one bounded change: the reattach handshake on Unix clients.\nIn scope: consuming or draining pending OSC query responses in the\nclient attach path in `zellij-server`'s client connection handling\nbefore pane input is wired. Explicitly deferred, with reasons: the\nWindows session-switch variant reported in the thread (I cannot test\nWindows; the fix site may be shared, and I will say so in the PR so\nsomeone with a Windows setup can verify) and any change to how theme\ndetection caches its results.\n\nFiles: the client attach/reattach path in `zellij-server` (session\nconnection handling) and `zellij-client`'s terminal query issuance;\nexact functions to be pinned in the PR after tracing the query\nissuance with debug logs, which I have working (the leak's origin is\nvisible in `zellij --debug` output).\n\nTest plan: the repro loop: 5 consecutive SSH reattach cycles with no\nrgb strings in any pane; fresh-create still clean; 0.44.1 behavioral\nparity restored on the regression command sequence. The cache\ncontrol (one clean attach after cache clear) must become \"always\nclean\".\n\nRisk: draining input at attach risks eating one legitimate keystroke\ntyped during the handshake window; I will bound the drain to OSC\nresponse patterns rather than a time window, and call that decision\nout for review.",
+  "plan_comment_markdown": "I reproduced this over SSH with a clean regression window (0.44.1\nclean, 0.44.2 on leaking; report above, including the cache\nobservation from this thread). Plan: consume pending OSC color query\nresponses in the reattach handshake before pane input is wired,\nbounded to the Unix client path. I cannot test the Windows\nsession-switch variant reported here, so I am explicitly leaving it\nout and will flag the shared fix site in the PR for someone with a\nWindows setup to verify. Report-back once I have the handshake\nchange behind the repro loop."
+}

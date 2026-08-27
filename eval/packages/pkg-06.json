@@ -1,0 +1,40 @@
+{
+  "id": "pkg-06",
+  "calibration": false,
+  "source": "kubernetes/minikube#21408",
+  "captured": "2026-08-18",
+  "repo_facts": {
+    "raw_markdown": "- repo: kubernetes/minikube (32040 stars, archived: no)\n- description: Run Kubernetes locally.\n- latest release: v1.38.1 (2026-02-19)\n- bug reports: template asks what happened, the exact command to reproduce, the full output of the failed command, the output of `minikube logs`, the operating system, and the driver\n- contribution policy (CONTRIBUTING.md): standard Kubernetes-project contribution guide (CLA, DCO); no stated AI policy"
+  },
+  "issue": {
+    "title": "containerd: preloaded images fail to save",
+    "number": 21408,
+    "author": "nirs",
+    "author_association": "MEMBER",
+    "opened": "2025-08-23",
+    "state": "open",
+    "labels": [
+      "kind/bug",
+      "lifecycle/frozen"
+    ],
+    "body_markdown": "Saving preloaded images (e.g. `registry.k8s.io/pause:3.10`) with the\ncontainerd runtime is broken, creating an empty tar. Saving images\npulled into minikube works. The reporter suspects the preloaded\nimages were not prepared with containerd and their internal structure\ndiffers from images pulled into the cluster by containerd.\n\nRepro (macOS/vfkit shown; Linux/kvm behaves the same):\n\n```\n% minikube start --driver vfkit --container-runtime containerd\n% minikube image save registry.k8s.io/pause:3.10 test.tar; echo $?\n0\n% file test.tar\ntest.tar: empty\n```"
+  },
+  "comments_total": 10,
+  "thread_highlights": [
+    {
+      "date": "2025-08-23",
+      "author": "nirs",
+      "author_association": "MEMBER",
+      "summary_markdown": "running with `--alsologtostderr --v=10` reveals interesting failures that are not reported to the user"
+    },
+    {
+      "date": "2025-08-23",
+      "author": "nirs",
+      "author_association": "MEMBER",
+      "summary_markdown": "notes minikube bundles containerd 1.7.23 while 1.7.28 is current"
+    }
+  ],
+  "repro_evidence_markdown": "The reproduction this plan builds on, excerpted from the accepted\nrepro report:\n\nEnvironment: minikube v1.38.1 (Homebrew), vfkit driver, containerd\nruntime (bundled 1.7.23), macOS 15.6 (arm64).\n\nSteps:\n\n1. `minikube start --driver vfkit --container-runtime containerd`\n2. `minikube image save registry.k8s.io/pause:3.10 test.tar; echo $?`\n   prints `0`\n3. `file test.tar` prints `test.tar: empty`\n4. Verbose re-run (`--alsologtostderr --v=10`) shows an export error\n   from the containerd runtime for the preloaded image; the command\n   still exits 0 with the empty tar.\n\nControl run: `minikube image pull nginx:alpine` followed by\n`minikube image save nginx:alpine nginx.tar` produces a valid tar\n(`file` reports a POSIX tar archive; `tar tf` lists layers).\n\nExpected: saving a preloaded image produces a valid tar, or the\ncommand fails loudly.\n\nActual: empty tar with exit 0 for preloaded images only, matching the\nissue; the underlying export error is swallowed.",
+  "plan_markdown": "### Problem statement\n\nThe preload/save pipeline for containerd is structurally unsound, and\nthis issue is the visible tip. Fixing only the save path would leave\nthe deeper mismatch in place, so this plan addresses the pipeline as\na whole.\n\n### Proposed changes\n\n1. Regenerate the preload tarballs so their internal layout is\n   produced by containerd itself (native content store layout),\n   replacing the current generation path in the preload build\n   scripts.\n2. Upgrade the bundled containerd from 1.7.23 to 1.7.28 for every\n   runtime and driver combination, since we are on an old patch\n   series anyway.\n3. Introduce a unified image-operations abstraction so `image save`,\n   `image load`, and `image ls` share one code path across docker,\n   containerd, and cri-o instead of three divergent ones.\n4. Surface export errors to the user (non-zero exit) instead of\n   swallowing them.\n5. Add a CI matrix job exercising image save/load for each runtime so\n   this class of drift cannot land again.\n\n### Files and areas\n\nPreload generation scripts, `pkg/minikube/cruntime/` (all three\nruntime implementations), the image command layer in\n`cmd/minikube/cmd/image.go`, CI workflow definitions.\n\n### Test plan\n\nAfter the pipeline rework, `minikube image save` for a preloaded\nimage produces a valid tar on containerd (the repro's step 2 and 3\nwith `file` showing a POSIX tar), and the new CI matrix passes for\nall three runtimes.",
+  "plan_comment_markdown": "I reproduced the empty-tar save on vfkit/containerd (report above)\nand traced it to the preload structure mismatch the issue suspects.\nRather than patch just the save path, I plan to fix the pipeline\nproperly: regenerate preloads in containerd's native layout, bump the\nbundled containerd to 1.7.28 across runtimes, unify the image\nsave/load code paths behind one abstraction, make export errors fail\nloudly, and add a runtime CI matrix for image operations. It is a\nbigger change than the one-line symptom fix, but it removes the whole\nclass. I'll start with the preload generation piece."
+}

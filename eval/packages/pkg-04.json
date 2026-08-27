@@ -1,0 +1,65 @@
+{
+  "id": "pkg-04",
+  "calibration": false,
+  "source": "junegunn/fzf#4260",
+  "captured": "2026-08-18",
+  "repo_facts": {
+    "raw_markdown": "- repo: junegunn/fzf (82558 stars, archived: no)\n- description: A command-line fuzzy finder.\n- latest release: v0.74.3 (2026-08-17)\n- bug reports: template asks for OS, shell, confirmation the manual and existing issues were checked, and the problem with steps to reproduce\n- contribution policy (CONTRIBUTING.md): standard contribution guide; no stated AI policy"
+  },
+  "issue": {
+    "title": "FZF appears to swallow key presses when used with `less` on Git Bash with ZSH on Windows",
+    "number": 4260,
+    "author": "marovira",
+    "author_association": "NONE",
+    "opened": "2025-02-19",
+    "state": "open",
+    "labels": [
+      "bug",
+      "help-needed",
+      "windows"
+    ],
+    "body_markdown": "Steps: in Git Bash (or ZSH within Git Bash) on Windows, run\n`echo \"<file>\" | fzf --bind=\"enter:execute(less {})\"` and press enter\nto select the file. The `less` prompt opens, but no key press reaches\nit: j, k, Esc, Ctrl-d, Ctrl-c all do nothing, and the only way back to\nthe shell is to kill the `less` process.\n\nIf regular keys are pressed and `less` is then killed, the pressed\nkeys appear in fzf's prompt, which suggests fzf is swallowing the key\npresses that should have gone to `less`. The issue is exclusive to\nWindows; Linux does not present the problem."
+  },
+  "comments_total": 11,
+  "thread_highlights": [
+    {
+      "date": "2025-02-19",
+      "author": "marovira",
+      "author_association": "NONE",
+      "summary_markdown": "first noticed via forgit (wfxr/forgit#423); diagnosis there pointed at fzf itself"
+    },
+    {
+      "date": "2025-03-02",
+      "author": "junegunn",
+      "author_association": "OWNER",
+      "summary_markdown": "asks whether winpty is in use, for `$TERM_PROGRAM` values, and whether `MSYS=enable_pcon` changes anything"
+    },
+    {
+      "date": "2025-03-03",
+      "author": "junegunn",
+      "author_association": "OWNER",
+      "summary_markdown": "reproduced on a Windows Server 2025 instance; found that `less` works when the execute command redirects with `> /dev/tty`, which non-Windows systems do not require"
+    },
+    {
+      "date": "2025-03-03",
+      "author": "junegunn",
+      "author_association": "OWNER",
+      "summary_markdown": "\"This seems to be the culprit\", pointing at the console input handling in `src/tui/light_windows.go` (lines 70-84)"
+    },
+    {
+      "date": "2025-03-03",
+      "author": "junegunn",
+      "author_association": "OWNER",
+      "summary_markdown": "posted a patched test binary from commit 8916cbc and asked the reporter to test it, noting it still consumes the first key for the execute program and that a proper fix for that part is not trivial"
+    },
+    {
+      "date": "2025-03-03",
+      "author": "marovira",
+      "author_association": "NONE",
+      "summary_markdown": "the patched binary pretty much solves it; only the first key press is still swallowed"
+    }
+  ],
+  "repro_evidence_markdown": "The reproduction this plan builds on, excerpted from the accepted\nrepro report:\n\nEnvironment: fzf 0.60.0 (choco), Git for Windows 2.47 (Git Bash,\nMSYS2), Windows 11 23H2; also reproduced under ZSH 5.9 inside Git\nBash.\n\nSteps:\n\n1. `seq 1000 > test`\n2. `echo test | fzf --bind 'enter:execute:less {}'`\n3. Press enter; `less` opens showing the file.\n4. Press j, k, q, Esc, Ctrl-d: no response; killed `less` from Task\n   Manager; the pressed `jkq` then appeared in fzf's prompt line.\n\nControl runs:\n\n- Same steps on Ubuntu 24.04: `less` responds to every key.\n- Same steps with the execute command written as\n  `less {} > /dev/tty`: `less` responds normally on Windows.\n\nExpected: keys reach `less` without a redirection workaround.\n\nActual: without the redirection, fzf's console input loop keeps\nreading the keys on Windows, and `less` never sees them, matching the\nissue.",
+  "plan_markdown": "Diagnosis: on Windows, fzf keeps reading console input while an\n`execute` child runs, so an interactive child without an explicit\n`/dev/tty` redirection never receives keys. The redirection control\nrun shows a reliable workaround exists today.\n\nScope: documentation only. In scope: the man page and the README\nexamples for `execute` bindings; a new FAQ entry. Not in scope: any\nchange to fzf's input handling code.\n\nApproach:\n\n1. Add a Windows note to the `execute` section of the man page: pipe\n   interactive commands to the terminal with `> /dev/tty`.\n2. Update the README's execute examples to include the redirection in\n   a Windows-flagged variant.\n3. Add a wiki FAQ entry describing the symptom (frozen pager, keys\n   appearing in the fzf prompt afterwards) so searchers land on the\n   workaround.\n\nTest plan: on the Windows repro machine, follow only the new\ndocumentation from a clean shell and confirm the documented command\nform gives a fully interactive `less` (j, k, q all work); confirm the\ndocs build renders the new man page section.",
+  "plan_comment_markdown": "Hi! I reproduced this on Windows 11 with fzf 0.60.0 (report above,\nincluding the `> /dev/tty` control that behaves correctly). Since the\nbehavior has a reliable workaround, I plan to document it properly:\na Windows note in the man page's execute section, updated README\nexamples, and an FAQ entry describing the symptom. That should stop\npeople from losing sessions to a frozen pager. I can have the docs PR\nup this week."
+}

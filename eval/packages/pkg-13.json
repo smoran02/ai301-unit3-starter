@@ -1,0 +1,57 @@
+{
+  "id": "pkg-13",
+  "calibration": false,
+  "source": "microsoft/terminal#20370",
+  "captured": "2026-08-18",
+  "repo_facts": {
+    "raw_markdown": "- repo: microsoft/terminal (104620 stars, archived: no)\n- description: The new Windows Terminal and the original Windows console host, all in the same place!\n- latest release: v1.24.11911.0 (2026-07-16)\n- bug reports: template asks for the Windows Terminal version, the Windows build number, other relevant software, steps to reproduce, expected behavior, and actual behavior\n- contribution policy (CONTRIBUTING.md): standard contribution guide with a CLA; no stated AI policy"
+  },
+  "issue": {
+    "title": "WT scrolls to top if in scrollback & scrollback cleared `ESC[3J`",
+    "number": 20370,
+    "author": "petrroll",
+    "author_association": "NONE",
+    "opened": "2026-06-28",
+    "state": "open",
+    "labels": [
+      "Product-Conhost",
+      "Area-Rendering",
+      "Area-VT",
+      "Issue-Bug",
+      "Product-Terminal",
+      "Impact-Visual",
+      "Area-AtlasEngine"
+    ],
+    "body_markdown": "Windows Terminal 1.24.11321.0, Windows build 10.0.26310.0.\n\nSteps:\n\n1. Have some scrollback.\n2. Scroll a bit up into the scrollback area.\n3. Have the running app emit `ESC[3J` (erase scrollback).\n\nThe issue includes a small node script that emits `ESC[3J`\nperiodically; scroll up while it runs and the viewport jumps to the\nabsolute top after a moment. Other terminals such as alacritty do not\ndo this.\n\nExpected: the view jumps to the bottom (or possibly stays where it\nwas), as in alacritty and many other terminals.\n\nActual: the view jumps to the absolute top."
+  },
+  "comments_total": 5,
+  "thread_highlights": [
+    {
+      "date": "2026-06-28",
+      "author": "lebensterben",
+      "author_association": "NONE",
+      "summary_markdown": "also occurs in the Preview build; mouse selection also misbehaves, as if the terminal keeps snapping to the prompt position"
+    },
+    {
+      "date": "2026-07-08",
+      "author": "DHowett",
+      "author_association": "MEMBER",
+      "summary_markdown": "\"That ain't right.\""
+    },
+    {
+      "date": "2026-07-08",
+      "author": "DHowett",
+      "author_association": "MEMBER",
+      "summary_markdown": "reproduced it, and the content disappeared after a while: \"Oh, it's a RENDERING bug!\""
+    },
+    {
+      "date": "2026-07-08",
+      "author": "DHowett",
+      "author_association": "MEMBER",
+      "summary_markdown": "\"We haven't had a classic invalidation bug in quite some time. Good find!\""
+    }
+  ],
+  "repro_evidence_markdown": "The reproduction this plan builds on, excerpted from the accepted\nrepro report:\n\nEnvironment: Windows Terminal 1.24.11911.0 (Store), Windows 11 build\n26100; node 22 for the repro script.\n\nSteps:\n\n1. Ran a script printing 500 numbered lines, then emitting `ESC[3J`\n   every 2 seconds while printing one line per second (equivalent to\n   the issue's attached script).\n2. Scrolled up about 30 lines into scrollback.\n3. Within one interval, the viewport jumped to the very top row of\n   the buffer (row 1 visible, scrollbar thumb at the top).\n4. Waited: after two more intervals, previously visible lines\n   rendered blank until a window resize forced a repaint (the\n   disappearing-content behavior a maintainer also reproduced).\n\nControl: the same script in alacritty 0.15: on `ESC[3J` the view\nsnaps to the bottom prompt line; no blanking.\n\nExpected: bottom snap (or stay in place), and no stale blank regions.\n\nActual: top jump plus stale rendering until a forced repaint,\nmatching the issue and the maintainer's rendering-bug observation.",
+  "plan_markdown": "Diagnosis: grounded in the repro and the maintainer's confirmation\nthat this is an invalidation bug: when `ESC[3J` deletes the\nscrollback while the user's viewport is scrolled into it, the\nviewport offset is left pointing at removed rows (clamping lands it\nat the top) and the renderer is not invalidated for the shifted\nregion (the blanking in step 4).\n\nScope, one bounded change: the erase-scrollback path. In scope: the\n`ESC[3J` (erase scrollback) handler in the VT adapter\n(`AdaptDispatch::EraseInDisplay`, scrollback branch) and the\ninvalidation it hands the renderer. Not in scope: the mouse-selection\nmisbehavior noted in the thread (worth its own issue; I will file it\nseparately with a repro), and any general scrollback redesign.\n\nApproach:\n\n1. In the erase-scrollback branch, re-anchor the user's viewport\n   relative to the mutable viewport (bottom) instead of letting the\n   clamp land at buffer top, mirroring the bottom-snap behavior the\n   control terminal shows.\n2. Invalidate the full visible region after the buffer rotation so\n   the Atlas engine repaints shifted rows (the stale-blank symptom).\n3. Add a unit test in the adapter tests covering viewport position\n   after `ESC[3J` with an offset viewport.\n\nTest plan: re-run the repro script; scrolled-up viewport must snap to\nthe bottom on the next `ESC[3J` (not top), and no region may render\nblank afterward (no resize needed). The alacritty control is the\nbehavioral reference. Adapter unit test as above.\n\nRisk: conhost and Terminal share this path; I will run the same\nrepro in conhost to check for a divergent regression, and I have not\nyet verified which layer clamps the viewport, so the exact fix site\nwithin the branch may move one level during implementation (named as\nan unknown, not a certainty).",
+  "plan_comment_markdown": "I reproduced both halves of this on 1.24.11911.0, the top jump and\nthe stale blank region that DHowett called out as an invalidation bug\n(report above, with alacritty as the reference behavior). Plan: fix\nthe viewport re-anchor and renderer invalidation in the\nerase-scrollback branch of `EraseInDisplay`, with an adapter unit\ntest; the mouse-selection symptom from the thread I would file\nseparately rather than fold in. Flagging that the exact clamp site\nmay be one layer up or down from where I have it; I will confirm\nwhile implementing and say so in the PR."
+}

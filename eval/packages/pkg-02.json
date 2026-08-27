@@ -1,0 +1,26 @@
+{
+  "id": "pkg-02",
+  "calibration": false,
+  "source": "sharkdp/bat#3844",
+  "captured": "2026-08-18",
+  "repo_facts": {
+    "raw_markdown": "- repo: sharkdp/bat (60197 stars, archived: no)\n- description: A cat(1) clone with wings.\n- latest release: v0.26.1 (2025-12-02)\n- bug reports: template asks what steps reproduce the bug, what happens, what you expected, how you installed bat, and for the output of `bat --version` plus environment details\n- contribution policy (CONTRIBUTING.md): standard contribution guide; no stated AI policy"
+  },
+  "issue": {
+    "title": "bat panics (capacity overflow) on `--terminal-width 1` wrapping a double-width char with a background",
+    "number": 3844,
+    "author": "leeewee",
+    "author_association": "NONE",
+    "opened": "2026-07-17",
+    "state": "open",
+    "labels": [
+      "bug"
+    ],
+    "body_markdown": "`bat --terminal-width 1 --wrap character` aborts with `capacity\noverflow` (exit 101) when a line contains a character wider than the\nterminal (a double-width CJK char or emoji) and a background is\npainted on that line (`--highlight-line`, or a theme/style that fills\nthe row background). The same defect class as the `--style=snip`\nwidth-1 panic (#3803).\n\n```\n$ printf '📦📦\\n' | bat --highlight-line 1 --terminal-width 1 --wrap character \\\n                       --color always --paging never --theme OneHalfDark\nthread 'main' panicked at library/alloc/src/slice.rs:524:23:\ncapacity overflow\n$ echo $?\n101\n```\n\nRoot cause per the report: in `InteractivePrinter::print_line`\n(`src/printer.rs`), wrapping branch, `cursor_max` is the terminal\nwidth (line 692) and `cursor` accumulates each chunk's display width.\nWhen a chunk is wider than the remaining width, `cursor` overshoots\n`cursor_max`, and the end-of-line background fill at line 934 computes\n`\" \".repeat(cursor_max - cursor)`, a usize subtraction that underflows\nand aborts inside `str::repeat`. The sibling cursor advance at line\n795 is the same tiny-width/wide-char pairing.\n\nExpected: a terminal narrower than a single glyph should clamp the\nbackground fill to empty, not underflow and abort, mirroring the\nclamping bat already applies elsewhere."
+  },
+  "comments_total": 0,
+  "thread_highlights": [],
+  "repro_evidence_markdown": "The reproduction this plan builds on, excerpted from the accepted\nrepro report:\n\nEnvironment: bat 0.26.1 (cargo install, rustc 1.96.0), Arch Linux,\nxterm-256color.\n\nSteps:\n\n```\n$ printf '📦📦\\n' | bat --highlight-line 1 --terminal-width 1 --wrap character \\\n                       --color always --paging never --theme OneHalfDark\nthread 'main' panicked at library/alloc/src/slice.rs:524:23:\ncapacity overflow\n$ echo $?\n101\n```\n\nControl run, width 2 (equal to the glyph's display width):\n\n```\n$ printf '📦📦\\n' | bat --highlight-line 1 --terminal-width 2 --wrap character \\\n                       --color always --paging never --theme OneHalfDark\n📦\n📦\n$ echo $?\n0\n```\n\nSecond control: same width-1 command without `--highlight-line` (no\nbackground painted) exits 0.\n\nExpected: clamped output (or empty fill) at width 1, exit 0.\n\nActual: abort with `capacity overflow`, exit 101, exactly when the\nline carries a background and a glyph wider than the terminal.",
+  "plan_markdown": "Diagnosis: the width-1 abort is the usize underflow the issue pins at\n`src/printer.rs:934`: `cursor` overshoots `cursor_max` when a chunk's\ndisplay width exceeds the remaining width, and the background fill\nsubtracts past zero. Both controls in the repro fit: no background, no\nsubtraction; width 2, no overshoot.\n\nChange, one fix: clamp the fill with `saturating_sub` (fill length 0\nwhen `cursor` overshot), and apply the same clamp to the sibling\ncursor advance at line 795 so the cursor never overshoots in the\nfirst place. Audit the two other `cursor_max - cursor` sites in\n`print_line` for the same pattern. Not in scope: redesigning wide-char\nwrapping at tiny widths (the visual result at width 1 stays imperfect;\nthis fix removes the abort).\n\nFiles: `src/printer.rs` (the two subtraction sites), `tests/` (one\nregression case).\n\nTest plan: re-run the repro command, expect drawn output and exit 0;\nre-run both controls unchanged; add the repro as an integration test\npinned at width 1. Risk: other underflow-prone width arithmetic may\nexist outside `print_line`; I will grep printer.rs for bare `-` on\ncursor variables and note anything suspicious in the PR rather than\nfixing beyond this issue.",
+  "plan_comment_markdown": "I can take this one. Repro'd on 0.26.1 (report above): the underflow\nis the background-fill subtraction the issue points at, plus its\nsibling advance. Plan: saturating clamps at both sites in\n`src/printer.rs`, a width-1 regression test, nothing beyond the abort\n(same class as #3803, so I'll mention it in the PR for the\nmaintainers' cross-reference). Report-back once the test is in."
+}

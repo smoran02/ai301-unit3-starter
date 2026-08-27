@@ -1,0 +1,26 @@
+{
+  "id": "pkg-10",
+  "calibration": false,
+  "source": "starship/starship#7677",
+  "captured": "2026-08-18",
+  "repo_facts": {
+    "raw_markdown": "- repo: starship/starship (59457 stars, archived: no)\n- description: The minimal, blazing-fast, and infinitely customizable prompt for any shell!\n- latest release: v1.26.0 (2026-06-28)\n- bug reports: template asks reporters to file via `starship bug-report` (pre-populates the system configuration) and to give current behavior, expected behavior, environment (starship version, shell type and version, OS), and the relevant starship configuration\n- contribution policy (CONTRIBUTING.md): standard contribution guide; no stated AI policy"
+  },
+  "issue": {
+    "title": "Git related modules are extremely slow on windows",
+    "number": 7677,
+    "author": "FlyinCow",
+    "author_association": "NONE",
+    "opened": "2026-08-17",
+    "state": "open",
+    "labels": [
+      "bug"
+    ],
+    "body_markdown": "The docs note the git status module is very slow in Windows\ndirectories under WSL and suggest the `windows_starship` option, but\nthe reporter is using Windows git with Windows starship and it is\nstill slow when entering a git folder. Both starship and git are\ninstalled via scoop; the reporter suspects scoop-installed git may be\ninvolved, since the GitHub CLI also misbehaves with it.\n\nEnvironment from the report: starship 1.26.0, PowerShell 5.1, Windows\n10.0.26200, vscode terminal, rust 1.96.0 build.\n\nExpected behavior, as stated in the report: \"Faster.\""
+  },
+  "comments_total": 0,
+  "thread_highlights": [],
+  "repro_evidence_markdown": "The reproduction this plan builds on, excerpted from the accepted\nrepro report:\n\nEnvironment: starship 1.26.0 (scoop), git 2.51.0.windows.1 (scoop),\nPowerShell 5.1, Windows 10 build 26200; test repo: a clone of\nkubernetes/kubernetes (large working tree, clean state).\n\nSteps:\n\n1. `cd` into the test repo with the default starship config\n   (git_branch and git_status enabled).\n2. Measured prompt latency with starship's own timer:\n   `starship timings` after rendering the prompt.\n\nArtifact (abridged `starship timings` output):\n\n```\n git_status  -  1873ms\n git_branch  -    41ms\n directory   -     2ms\n```\n\n3. Control: same directory with `git_status.disabled = true` in\n   starship.toml: total prompt time drops under 100ms.\n4. Control: same steps in a 10-file repo: git_status 38ms.\n\nExpected: prompt latency in the same ballpark as `git status`\nitself, which takes about 350ms in this repo from the same shell.\n\nActual: git_status dominates the prompt at about 1.9s on the large\nrepo, about 5x the cost of running `git status` directly, matching\nthe reported slowness.",
+  "plan_markdown": "The git modules on Windows clearly have performance problems, so the\nplan is to dig into where the time goes and speed them up.\n\nSteps:\n\n1. Profile starship on Windows to find the slow parts of the git\n   modules.\n2. Investigate whether scoop-installed git behaves differently from\n   the official installer, since the reporter and I both use scoop.\n3. Look into caching git information between prompts so repeated\n   renders are cheaper.\n4. Optimize whatever the profiling turns up, and consider spawning\n   fewer git subprocesses in general.\n\nTest plan: after optimizing, the prompt should feel fast in big repos\non Windows, and `starship timings` should look much better.",
+  "plan_comment_markdown": "This matches what I see on my machine too, so I profiled it a bit\n(numbers above) and git_status is where the time goes. I am going to\ninvestigate the git modules' performance on Windows, look at the\nscoop angle, and explore caching between prompts. Will optimize\nwhatever shows up hot and report back when things are faster."
+}
